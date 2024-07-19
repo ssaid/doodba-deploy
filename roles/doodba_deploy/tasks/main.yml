@@ -1,0 +1,80 @@
+---
+- name: Clone/Update the repo
+  become: true
+  become_user: "{{user}}"
+  ansible.builtin.git:
+    repo: "{{repo}}"
+    dest: "{{dest}}"
+    single_branch: yes
+    version: "{{branch}}"
+- name: Symlink the docker-compose.yml to test or prod
+  become: true
+  become_user: "{{user}}"
+  ansible.builtin.shell:
+    cmd: "ln -sf {{mode}}.yaml docker-compose.yaml"
+    chdir: "{{dest}}"
+- name: Create .docker folder
+  become: true
+  become_user: "{{user}}"
+  ansible.builtin.file:
+    path: "{{dest}}/.docker"
+    state: directory
+- name: Copy backup.env files to .docker folder
+  become: true
+  become_user: "{{user}}"
+  template:
+    src: templates/backup.env.j2
+    dest: "{{dest}}/.docker/backup.env"
+- name: Copy db-access.env files to .docker folder
+  become: true
+  become_user: "{{user}}"
+  template:
+    src: templates/db-access.env.j2
+    dest: "{{dest}}/.docker/db-access.env"
+- name: Copy db-creation.env files to .docker folder
+  become: true
+  become_user: "{{user}}"
+  template:
+    src: templates/db-creation.env.j2
+    dest: "{{dest}}/.docker/db-creation.env"
+- name: Copy odoo.env files to .docker folder
+  become: true
+  become_user: "{{user}}"
+  template:
+    src: templates/odoo.env.j2
+    dest: "{{dest}}/.docker/odoo.env"
+- name: Reinitializing environment (recreate database prod)...
+  become: true
+  become_user: "{{user}}"
+  ansible.builtin.shell:
+    cmd: docker-compose exec db dropdb -U odoo prod && docker-compose exec db createdb -U odoo prod
+    chdir: "{{dest}}"
+  when: reinit | bool
+- name: Booting... this may take a few minutes (pulling|building) and initializing database... Patience!
+  become: true
+  become_user: "{{user}}"
+  ansible.builtin.shell:
+    cmd: docker compose run --rm odoo odoo --stop-after-init -i base -d prod
+    chdir: "{{dest}}"
+  when: init or reinit | bool
+- name: Restart services of this project
+  become: true
+  become_user: "{{user}}"
+  ansible.builtin.shell:
+    cmd: docker compose up -d --force-recreate
+    chdir: "{{dest}}"
+# Configure traefik with dynamic configuration
+- name: Copy traefik dynamic conf for this server
+  become: true
+  become_user: "{{admin_user}}"
+  template:
+    src: templates/traefik.yaml.j2
+    dest: "{{traef_path}}/{{project}}-{{version}}-{{mode}}.yaml"
+# Shall I recover the backup ?
+- name: Restoring the last backup available...
+  become: true
+  become_user: "{{user}}"
+  ansible.builtin.shell:
+    cmd: docker-compose stop odoo && docker-compose exec backup dropdb prod && docker-compose exec backup createdb prod && docker-compose exec backup restore --force && docker-compose exec backup sh -c 'psql -f $SRC/$PGDATABASE.sql' && docker compose up -d --force-recreate
+    chdir: "{{dest}}"
+  when: restore | bool

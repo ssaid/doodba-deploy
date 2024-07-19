@@ -1,0 +1,113 @@
+http:
+  routers:
+    # Odoo Websocket or Longpolling
+    {{project_fq}}-longpolling-secure-0:
+{% if version | int <= 15 %}
+      rule: "Host(`{{ domain }}`) && PathPrefix(`/longpolling`)"
+{% else %}
+      rule: "Host(`{{ domain }}`) && Path(`/websocket`)"
+{% endif %}
+      service: {{project_fq}}-longpolling
+      middlewares:
+        - {{project_fq}}-addSTS
+        - {{project_fq}}-forceSecure
+      tls:
+        certResolver: letsencrypt
+
+    # Odoo Main
+    {{project_fq}}-forbiddenCrawlers-secure-0:
+      rule: "Host(`{{domain}}`) && (PathPrefix(`/`))"
+      service: {{project_fq}}-main
+      middlewares:
+{% if sablier and mode == "test" %}
+        - sablier-{{project_fq}}
+{% endif %}
+        - {{project_fq}}-addSTS
+        - {{project_fq}}-buffering
+        - {{project_fq}}-compress
+        - {{project_fq}}-forbid-crawlers
+        - {{project_fq}}-forceSecure
+      tls:
+        certResolver: letsencrypt
+
+{% if mode == "test" %}
+    # Mailhog
+    {{project_fq}}-mailhog-secure-0:
+      rule: "Host(`{{domain}}`) && PathPrefix(`/smtpfake/`)"
+      service: {{project_fq}}-mailhog
+      middlewares:
+        - {{project_fq}}-addSTS
+        - {{project_fq}}-buffering
+        - {{project_fq}}-compress
+        - {{project_fq}}-forbid-crawlers
+        - {{project_fq}}-forceSecure
+        - {{project_fq}}-mailhog-stripprefix
+      tls:
+        certResolver: letsencrypt
+{% endif %}
+
+  services:
+    # Websocket
+    {{project_fq}}-main:
+      loadBalancer:
+        servers:
+          - url: "http://{{project_fq}}-odoo-1:8069"
+    # Odoo Main
+    {{project_fq}}-longpolling:
+      loadBalancer:
+        servers:
+          - url: "http://{{project_fq}}-odoo-1:8072"
+{% if mode == "test" %}
+    # Mailhog
+    {{project_fq}}-mailhog:
+      loadBalancer:
+        servers:
+          - url: "http://{{project_fq}}-smtp-1:8025"
+{% endif %}
+
+  middlewares:
+{% if mode == "test" %}
+    {{project_fq}}-mailhog-stripprefix:
+      stripPrefix:
+        prefixes:
+          - "/smtpfake/"
+{% endif %}
+
+    {{project_fq}}-addSTS:
+      headers:
+        forceSTSHeader: true
+        stsSeconds: 63072000
+        stsIncludeSubdomains: true
+
+    {{project_fq}}-forceSecure:
+      redirectScheme:
+        scheme: https
+        permanent: true
+
+    {{project_fq}}-buffering:
+      buffering:
+        retryExpression: "IsNetworkError() && Attempts() < 5"
+
+    {{project_fq}}-compress:
+      compress: {}
+
+    {{project_fq}}-forbid-crawlers:
+      headers:
+        customResponseHeaders:
+          X-Robots-Tag: "noindex, nofollow"
+
+{% if sablier and mode == "test" %}
+    # (Automatic Up&Down of environments)
+    sablier-{{project_fq}}:
+      plugin:
+        sablier:
+          dynamic:
+            displayName: Odoo {{project_fq}}
+            refreshFrequency: 5s
+            showDetails: "true"
+            theme: hacker-terminal
+          group: default
+          names: {{project_fq}}-odoo-1,{{project_fq}}-db-1,{{project_fq}}-smtp-1
+          sablierUrl: http://sablier:10000
+          sessionDuration: {{sablier_time}}
+{% endif %}

@@ -1,0 +1,54 @@
+---
+- hosts: zeus
+  pre_tasks:
+    - name: Check required environment variables
+      fail:
+        msg: "Environment variable {{ item }} is not defined."
+      when: lookup('env', item) == ""
+      loop:
+        - 'DOODBA_REPO_URL'
+        - 'DOODBA_DBPASS'
+        - 'AWS_ACCESS_KEY_ID'
+        - 'AWS_SECRET_ACCESS_KEY'
+        - 'AWS_BK_PASSPHRASE'
+  roles:
+    - role: roles/doodba_deploy
+      project_fq: "{{project}}-{{version}}-{{mode}}"
+      domain: realstate.zeus.eynes.com.ar
+      # ^ What will be the url of the environment?
+      repo: "{{ lookup('ansible.builtin.env', 'DOODBA_REPO_URL', default='undefined') }}"
+      branch: main
+      # ^ Must have a doodba enviroment ready to deploy
+      project: realstate
+      # ^ Ideally try to match the repo name
+      version: "15"
+      # ^ Odoo Version
+      mode: test
+      # ^ Deploy mode: test|prod
+      user: user
+      # ^ Using what user shall I clone the repo?
+      dest: /home/user/odoo/{{project_fq}}
+      # ^ Where to clone the repo?
+      DBPASS: 11d60W8
+      # ^ Database password
+      # ~ Backup Credentials (You should have backups)
+      AWS_REGION: "{{ lookup('ansible.builtin.env', 'AWS_REGION', default='undefined') }}"
+      AWS_AK: "{{ lookup('ansible.builtin.env', 'AWS_ACCESS_KEY_ID', default='undefined') }}"
+      AWS_SK: "{{ lookup('ansible.builtin.env', 'AWS_SECRET_ACCESS_KEY', default='undefined') }}"
+      AWS_BK_PASSPHRASE: "{{ lookup('ansible.builtin.env', 'AWS_BK_PASSPHRASE', default='undefined') }}"
+      # ~ Traefik configuration
+      admin_user: user
+      # ^ What user should have the traefik configuration
+      traef_path: /home/{{admin_user}}/traefik/config/
+      # ^ Where to deploy the traefik configuration
+      sablier: True
+      # ^ Do you want scale-to-zero? (it will be disabled on prod mode)
+      sablier_time: 30m
+      # ^ Time before shutoff containers
+      init: true
+      # ^ -i base to setup db
+      reinit: false
+      # ^ if enabled, will recreate the existing database
+      # BEWARE: If db it is already initialized it might screw-it-up...
+      restore: false
+      # ^ If enabled it will try the restore from backup of duplicity
